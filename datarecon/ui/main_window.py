@@ -101,10 +101,12 @@ class DataReconWindow(QMainWindow):
         matching_hint = QLabel("Keys identify which records belong together. Use all shared columns by default.")
         matching_hint.setObjectName("sectionHint")
         self.matching_columns_layout.addWidget(matching_hint)
-        self.use_all_columns_checkbox = QCheckBox("Use all common columns")
-        self.use_all_columns_checkbox.setChecked(True)
-        self.use_all_columns_checkbox.toggled.connect(self._toggle_matching_columns)
-        self.matching_columns_layout.addWidget(self.use_all_columns_checkbox)
+        matching_columns_toolbar = QHBoxLayout()
+        matching_columns_toolbar.addStretch()
+        self.clear_matching_columns_button = QPushButton("Clear all")
+        self.clear_matching_columns_button.clicked.connect(self._clear_matching_columns)
+        matching_columns_toolbar.addWidget(self.clear_matching_columns_button)
+        self.matching_columns_layout.addLayout(matching_columns_toolbar)
 
         self.matching_columns_container = QWidget()
         self.matching_columns_container_layout = QVBoxLayout(self.matching_columns_container)
@@ -265,13 +267,12 @@ class DataReconWindow(QMainWindow):
         self.matching_column_checkboxes = []
 
         if not columns:
-            self.use_all_columns_checkbox.setChecked(True)
-            self.use_all_columns_checkbox.setEnabled(False)
+            self.clear_matching_columns_button.setEnabled(False)
             self.matching_columns_container.setEnabled(False)
             return
 
-        self.use_all_columns_checkbox.setEnabled(True)
-        self.matching_columns_container.setEnabled(not self.use_all_columns_checkbox.isChecked())
+        self.clear_matching_columns_button.setEnabled(True)
+        self.matching_columns_container.setEnabled(True)
 
         for column in columns:
             checkbox = QCheckBox(column)
@@ -279,15 +280,11 @@ class DataReconWindow(QMainWindow):
             self.matching_column_checkboxes.append(checkbox)
             self.matching_columns_container_layout.addWidget(checkbox)
 
-    def _toggle_matching_columns(self, checked: bool) -> None:
-        self.matching_columns_container.setEnabled(not checked)
-        if checked:
-            for checkbox in self.matching_column_checkboxes:
-                checkbox.setChecked(True)
+    def _clear_matching_columns(self) -> None:
+        for checkbox in self.matching_column_checkboxes:
+            checkbox.setChecked(False)
 
     def _get_selected_matching_columns(self) -> list[str]:
-        if self.use_all_columns_checkbox.isChecked():
-            return []
         return [checkbox.text() for checkbox in self.matching_column_checkboxes if checkbox.isChecked()]
 
     def _run_comparison(self) -> None:
