@@ -43,6 +43,8 @@ class DataReconWindow(QMainWindow):
         self.right_path: str | None = None
         self.left_dataset = None
         self.right_dataset = None
+        self.left_sheets: list[str] = []
+        self.right_sheets: list[str] = []
         self.matching_column_checkboxes: list[QCheckBox] = []
 
         self._build_ui()
@@ -56,7 +58,7 @@ class DataReconWindow(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
@@ -85,13 +87,25 @@ class DataReconWindow(QMainWindow):
         self.right_path_label = QLabel("No file selected")
         self.select_left_button = QPushButton("Select File A")
         self.select_right_button = QPushButton("Select File B")
+        self.left_sheet_label = QLabel("Worksheet")
+        self.right_sheet_label = QLabel("Worksheet")
+        self.left_sheet_combo = QComboBox()
+        self.right_sheet_combo = QComboBox()
+        self.left_sheet_combo.currentTextChanged.connect(self._refresh_matching_columns)
+        self.right_sheet_combo.currentTextChanged.connect(self._refresh_matching_columns)
         self.select_left_button.clicked.connect(self._choose_left_file)
         self.select_right_button.clicked.connect(self._choose_right_file)
 
         files_row = QHBoxLayout()
         files_row.setSpacing(14)
-        files_row.addWidget(self._create_file_card("FILE A", self.left_path_label, self.select_left_button))
-        files_row.addWidget(self._create_file_card("FILE B", self.right_path_label, self.select_right_button))
+        files_row.addWidget(self._create_file_card(
+            "FILE A", self.left_path_label, self.select_left_button,
+            self.left_sheet_label, self.left_sheet_combo,
+        ))
+        files_row.addWidget(self._create_file_card(
+            "FILE B", self.right_path_label, self.select_right_button,
+            self.right_sheet_label, self.right_sheet_combo,
+        ))
         scroll_layout.addLayout(files_row)
 
         self.matching_columns_group = QGroupBox("Matching columns")
@@ -124,6 +138,10 @@ class DataReconWindow(QMainWindow):
 
         self.results_tabs = QTabWidget()
         self.results_tabs.setDocumentMode(True)
+        self.sheets_table = QTableWidget(0, 2)
+        self.sheets_table.setHorizontalHeaderLabels(["Only in File A", "Only in File B"])
+        self._configure_table(self.sheets_table)
+        self.results_tabs.addTab(self.sheets_table, "Workbook sheets")
         self.schema_table = QTableWidget(0, 3)
         self.schema_table.setHorizontalHeaderLabels(["Common", "Only in A", "Only in B"])
         self._configure_table(self.schema_table)
@@ -164,7 +182,14 @@ class DataReconWindow(QMainWindow):
         main_layout.addWidget(scroll_area)
         self.setCentralWidget(central)
 
-    def _create_file_card(self, label: str, path_label: QLabel, button: QPushButton) -> QFrame:
+    def _create_file_card(
+        self,
+        label: str,
+        path_label: QLabel,
+        button: QPushButton,
+        sheet_label: QLabel,
+        sheet_combo: QComboBox,
+    ) -> QFrame:
         card = QFrame()
         card.setObjectName("fileCard")
         layout = QVBoxLayout(card)
@@ -179,6 +204,12 @@ class DataReconWindow(QMainWindow):
         layout.addWidget(eyebrow)
         layout.addWidget(path_label)
         layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignLeft)
+        sheet_label.setVisible(False)
+        sheet_combo.setVisible(False)
+        sheet_combo.setEnabled(False)
+        sheet_combo.setToolTip("Select the worksheet to compare from this workbook.")
+        layout.addWidget(sheet_label)
+        layout.addWidget(sheet_combo)
         return card
 
     def _configure_table(self, table: QTableWidget) -> None:
@@ -187,8 +218,9 @@ class DataReconWindow(QMainWindow):
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setWordWrap(False)
         table.setMinimumHeight(300)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         table.verticalHeader().setVisible(False)
-        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setStretchLastSection(False)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
     def _apply_style(self) -> None:
@@ -227,6 +259,8 @@ class DataReconWindow(QMainWindow):
         if path:
             self.left_path = path
             self.left_path_label.setText(Path(path).name)
+            self.left_dataset = None
+            self._configure_sheet_selector(path, self.left_sheets, self.left_sheet_label, self.left_sheet_combo, "left")
             self._refresh_matching_columns()
 
     def _choose_right_file(self) -> None:
@@ -239,7 +273,35 @@ class DataReconWindow(QMainWindow):
         if path:
             self.right_path = path
             self.right_path_label.setText(Path(path).name)
+            self.right_dataset = None
+            self._configure_sheet_selector(path, self.right_sheets, self.right_sheet_label, self.right_sheet_combo, "right")
             self._refresh_matching_columns()
+
+    def _configure_sheet_selector(
+        self,
+        path: str,
+        sheets: list[str],
+        sheet_label: QLabel,
+        sheet_combo: QComboBox,
+        side: str,
+    ) -> None:
+        is_excel = Path(path).suffix.lower() == ".xlsx"
+        sheet_names = self.service.get_sheet_names(path) if is_excel else []
+        sheets[:] = sheet_names
+
+        sheet_combo.blockSignals(True)
+        sheet_combo.clear()
+        sheet_combo.addItems(sheet_names)
+        sheet_combo.setCurrentIndex(0 if sheet_names else -1)
+        sheet_combo.blockSignals(False)
+        sheet_label.setVisible(is_excel)
+        sheet_combo.setVisible(is_excel)
+        sheet_combo.setEnabled(bool(sheet_names))
+        setattr(self, f"{side}_dataset", None)
+
+    def _selected_sheet(self, side: str) -> str | None:
+        combo = self.left_sheet_combo if side == "left" else self.right_sheet_combo
+        return combo.currentText() or None
 
     def _refresh_matching_columns(self) -> None:
         if not self.left_path or not self.right_path:
@@ -247,8 +309,8 @@ class DataReconWindow(QMainWindow):
             return
 
         try:
-            left_dataset = self.service.load_dataset(self.left_path)
-            right_dataset = self.service.load_dataset(self.right_path)
+            left_dataset = self.service.load_dataset(self.left_path, self._selected_sheet("left"))
+            right_dataset = self.service.load_dataset(self.right_path, self._selected_sheet("right"))
             self.left_dataset = left_dataset
             self.right_dataset = right_dataset
             common_columns = sorted(
@@ -256,9 +318,21 @@ class DataReconWindow(QMainWindow):
                 & set(str(column).strip().lower() for column in right_dataset.columns)
             )
             self._set_matching_column_checkboxes(common_columns)
+            self._render_sheet_differences()
         except Exception as exc:  # pragma: no cover - UI fail path
             self._set_matching_column_checkboxes([])
             self.status_box.setPlainText(f"Unable to inspect columns: {exc}")
+
+    def _render_sheet_differences(self) -> None:
+        only_in_a = sorted(set(self.left_sheets) - set(self.right_sheets))
+        only_in_b = sorted(set(self.right_sheets) - set(self.left_sheets))
+        row_count = max(len(only_in_a), len(only_in_b))
+        self.sheets_table.setRowCount(row_count)
+        for row in range(row_count):
+            value_a = only_in_a[row] if row < len(only_in_a) else ""
+            value_b = only_in_b[row] if row < len(only_in_b) else ""
+            self.sheets_table.setItem(row, 0, QTableWidgetItem(value_a))
+            self.sheets_table.setItem(row, 1, QTableWidgetItem(value_b))
 
     def _set_matching_column_checkboxes(self, columns: list[str]) -> None:
         for checkbox in self.matching_column_checkboxes:
@@ -294,8 +368,8 @@ class DataReconWindow(QMainWindow):
 
         try:
             if self.left_dataset is None or self.right_dataset is None:
-                self.left_dataset = self.service.load_dataset(self.left_path)
-                self.right_dataset = self.service.load_dataset(self.right_path)
+                self.left_dataset = self.service.load_dataset(self.left_path, self._selected_sheet("left"))
+                self.right_dataset = self.service.load_dataset(self.right_path, self._selected_sheet("right"))
 
             result = self.service.compare(
                 self.left_dataset,
