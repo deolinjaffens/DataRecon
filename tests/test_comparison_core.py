@@ -1,11 +1,13 @@
 import pandas as pd
 import pytest
 
+from datarecon.application.comparison_service import ComparisonService
 from datarecon.domain.comparison import (
     ComparisonOptions,
     SchemaComparisonResult,
     compare_dataframes,
 )
+from datarecon.infrastructure.excel_processor import get_excel_sheet_names, load_excel_records
 
 
 def test_same_columns_and_matching_records():
@@ -168,3 +170,22 @@ def test_schema_result_is_structured():
     assert result.common_columns == ["id"]
     assert result.columns_only_in_a == ["name"]
     assert result.columns_only_in_b == ["age"]
+
+
+def test_excel_sheet_names_and_explicit_sheet_loading(tmp_path):
+    workbook_path = tmp_path / "multiple_sheets.xlsx"
+    with pd.ExcelWriter(workbook_path) as writer:
+        pd.DataFrame([{"id": "A1"}]).to_excel(writer, sheet_name="Customers", index=False)
+        pd.DataFrame([{"id": "B1"}]).to_excel(writer, sheet_name="Orders", index=False)
+
+    assert get_excel_sheet_names(str(workbook_path)) == ["Customers", "Orders"]
+    selected_sheet = load_excel_records(str(workbook_path), "Orders")
+
+    assert selected_sheet.to_dict(orient="records") == [{"id": "B1"}]
+
+    service = ComparisonService()
+    assert service.get_sheet_names(str(workbook_path)) == ["Customers", "Orders"]
+    assert service.load_dataset(str(workbook_path)).dataframe.to_dict(orient="records") == [{"id": "A1"}]
+    assert service.load_dataset(str(workbook_path), "Orders").dataframe.to_dict(orient="records") == [
+        {"id": "B1"}
+    ]
